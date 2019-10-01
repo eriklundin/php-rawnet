@@ -45,10 +45,10 @@ int le_rawnet;
 static const char hexcodes[] = "0123456789ABCDEF";
 
 void _rawnet_init_openssl() {
-		SSL_load_error_strings();
-		SSL_library_init();
-		ERR_load_BIO_strings();
-		OpenSSL_add_all_algorithms();
+	SSL_load_error_strings();
+	SSL_library_init();
+	ERR_load_BIO_strings();
+	OpenSSL_add_all_algorithms();
 }
 
 void _rawnet_get_cert_data(X509 *xs, php_rawnet *res) {
@@ -327,6 +327,7 @@ PHP_FUNCTION(rawnet_connect) {
 		}
 	}
 
+	res->connecting = 1;
 	if(connect(res->socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 		switch(errno) {
 			case EAGAIN:
