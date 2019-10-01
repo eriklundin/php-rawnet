@@ -31,6 +31,7 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <poll.h>
 
 int le_rawnet;
 
@@ -225,6 +226,7 @@ PHP_FUNCTION(rawnet_init) {
 	rn->peer_cert_cn = NULL;
 	rn->peer_cert_serial = NULL;
 	rn->peer_cert_fingerprint = NULL;
+	rn->connecting = 0;
 
 	ZVAL_RES(return_value, zend_register_resource(rn, le_rawnet));
 	rn->res = Z_RES_P(return_value);
@@ -243,6 +245,8 @@ PHP_FUNCTION(rawnet_connect) {
 	struct sockaddr_in addr;
 	struct hostent *host;
 	struct timeval tv;
+	struct pollfd ufds;
+	int i, len, ret;
 
 	ZEND_PARSE_PARAMETERS_START(3,4)
 		Z_PARAM_RESOURCE(zid)
@@ -254,6 +258,33 @@ PHP_FUNCTION(rawnet_connect) {
 
 	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
 		RETURN_FALSE;
+	}
+
+	if(res->socket != -1 && res->connecting == 1) {
+
+		len = sizeof(i);
+		i = 0;
+		ufds.fd = res->socket;
+		ufds.events = POLLOUT;
+
+		if(poll(&ufds, 1, 0) > 0) {
+			ret = getsockopt(res->socket, SOL_SOCKET, SO_ERROR, &i, &len);
+			if(ret < 0) {
+				snprintf(errmsg, sizeof(errmsg), "Unable to connect to %s:%d (%d: %s)", res->hostname, res->port, errno, strerror(errno));
+				goto cleanup;
+			}
+
+			if(i != 0) {
+				snprintf(errmsg, sizeof(errmsg), "Unable to connect to %s:%d (%s)", res->hostname, res->port, strerror(i));
+				goto cleanup;
+			}
+
+			res->connecting = 0;
+			RETURN_TRUE;
+		} else {
+			RETURN_FALSE;
+		}
+
 	}
 
 	// Resolve the hostname
@@ -289,12 +320,12 @@ PHP_FUNCTION(rawnet_connect) {
 		goto cleanup;
 	}
 
-    if(res->blocking == 0) {
-        if(_rawnet_nonblock(res->socket, 1) < 0) {
-            snprintf(errmsg, sizeof(errmsg), "Unable to set socket to none-blocking");
-            goto cleanup;
-        }
-    }
+	if(res->blocking == 0) {
+		if(_rawnet_nonblock(res->socket, 1) < 0) {
+			snprintf(errmsg, sizeof(errmsg), "Unable to set socket to none-blocking");
+			goto cleanup;
+		}
+	}
 
 	if(connect(res->socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 		switch(errno) {
@@ -315,6 +346,7 @@ PHP_FUNCTION(rawnet_connect) {
 	cleanup:
 
 	close(res->socket);
+	res->connecting = 0;
 	res->socket = -1;
 	RETURN_STRING(errmsg);
 
@@ -632,6 +664,7 @@ PHP_FUNCTION(rawnet_accept) {
 
 	retres = ecalloc(1, sizeof(php_rawnet));
 	retres->blocking = 1;
+	retres->connecting = 0;
 	retres->socket = socket;
 	retres->port = ntohs(peer.sin_port);
 	retres->ssl = NULL;
