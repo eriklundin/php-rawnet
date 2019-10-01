@@ -28,7 +28,7 @@
 extern zend_module_entry rawnet_module_entry;
 # define phpext_rawnet_ptr &rawnet_module_entry
 
-# define PHP_RAWNET_VERSION "0.2.0"
+# define PHP_RAWNET_VERSION "0.2.1"
 
 #define CAAL(s, v) add_assoc_long_ex(return_value, s, sizeof(s) - 1, (zend_long) v);
 #define CAAS(s, v) add_assoc_string_ex(return_value, s, sizeof(s) - 1, (char *) (v ? v : ""));
