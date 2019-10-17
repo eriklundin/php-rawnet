@@ -874,7 +874,7 @@ PHP_FUNCTION(rawnet_ssl_listen) {
 	zval *zid;
 	char errmsg[255], ssl_errbuf[255];
 	zend_string *certificate, *privatekey, *cacertificate;
-	zend_bool forceclientcert;
+	zend_bool forceclientcert = FALSE;
 
 	ZEND_PARSE_PARAMETERS_START(4,5)
 		Z_PARAM_RESOURCE(zid)
