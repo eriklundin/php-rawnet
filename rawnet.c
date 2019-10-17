@@ -940,7 +940,7 @@ PHP_FUNCTION(rawnet_ssl_accept) {
 	php_rawnet *res;
 	zval *zid;
 	char errmsg[255];
-	zend_bool forceclientcert;
+	zend_bool forceclientcert = FALSE;
 	int ssl_errcode, ret;
 	X509 *peer_cert = NULL;
 
