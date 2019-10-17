@@ -1138,6 +1138,29 @@ PHP_FUNCTION(rawnet_getinfo) {
 }
 /* }}}*/
 
+
+/* {{{ array rawnet_getinfo( resource $rn )
+ */
+PHP_FUNCTION(rawnet_is_connecting) {
+
+	php_rawnet *res;
+	zval *zid;
+
+	ZEND_PARSE_PARAMETERS_START(1,1)
+		Z_PARAM_RESOURCE(zid)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
+		RETURN_FALSE;
+	}
+
+	if(res->connecting)
+		RETURN_TRUE;
+
+	RETURN_FALSE;
+}
+/* }}}*/
+
 /* {{{ PHP_RINIT_FUNCTION
  */
 PHP_RINIT_FUNCTION(rawnet)
@@ -1241,6 +1264,10 @@ ZEND_BEGIN_ARG_INFO(arginfo_rawnet_getinfo, 0)
 	ZEND_ARG_INFO(0, res)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO(arginfo_rawnet_is_connecting, 0)
+	ZEND_ARG_INFO(0, res)
+ZEND_END_ARG_INFO()
+
 /* }}} */
 
 /* {{{ rawnet_functions[]
@@ -1260,6 +1287,7 @@ static const zend_function_entry rawnet_functions[] = {
 	PHP_FE(rawnet_ssl_close,	arginfo_rawnet_ssl_close)
 	PHP_FE(rawnet_set_blocking,	arginfo_rawnet_set_blocking)
 	PHP_FE(rawnet_getinfo,		arginfo_rawnet_getinfo)
+	PHP_FE(rawnet_is_connecting,	arginfo_rawnet_is_connecting)
 	PHP_FE_END
 };
 /* }}} */
