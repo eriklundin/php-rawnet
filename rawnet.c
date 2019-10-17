@@ -977,7 +977,7 @@ PHP_FUNCTION(rawnet_ssl_accept) {
 				if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN) {
 					RETURN_FALSE;
 				} else {
-					snprintf(errmsg, sizeof(errmsg), "SSL_ERROR_SYSCALL: %d %s", errno, strerror(errno));
+					snprintf(errmsg, sizeof(errmsg), "SSL_ERROR_SYSCALL: %s", ERR_error_string(ERR_get_error(), NULL));
 					RETURN_STRING(errmsg);
 				}
 			break;
@@ -985,7 +985,7 @@ PHP_FUNCTION(rawnet_ssl_accept) {
 			case SSL_ERROR_WANT_WRITE:
 				RETURN_FALSE;
 			case SSL_ERROR_SSL:
-				snprintf(errmsg, sizeof(errmsg), "SSL_ERROR_SSL");
+				snprintf(errmsg, sizeof(errmsg), "SSL_ERROR_SSL: %s", ERR_error_string(ERR_get_error(), NULL));
 				RETURN_STRING(errmsg);
 			break;
 			case SSL_ERROR_ZERO_RETURN:
@@ -993,7 +993,7 @@ PHP_FUNCTION(rawnet_ssl_accept) {
 				RETURN_STRING(errmsg);
 			break;
 			default:
-				snprintf(errmsg, sizeof(errmsg), "Unknown error from SSL_accept(): %d", ssl_errcode);
+				snprintf(errmsg, sizeof(errmsg), "Unknown error from SSL_accept(): %d (%s)", ssl_errcode, ERR_error_string(ERR_get_error(), NULL));
 				RETURN_STRING(errmsg);
 		}
 	}
@@ -1005,6 +1005,12 @@ PHP_FUNCTION(rawnet_ssl_accept) {
 			goto cleanup;
 		}
 	} else {
+
+		if((ret = SSL_get_verify_result(res->ssl)) != X509_V_OK) {
+			snprintf(errmsg, sizeof(errmsg), "Unable to verify client certificate: %d", ret);
+			goto cleanup;			
+		}
+
 		_rawnet_get_cert_data(peer_cert, res);
 		_rawnet_get_cert_cn(peer_cert, res);
 		_rawnet_get_cert_serial(peer_cert, res);
