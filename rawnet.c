@@ -723,7 +723,7 @@ PHP_FUNCTION(rawnet_ssl_connect) {
 	zend_string *certificate, *privatekey, *cacertificate;
 	char errmsg[256], tmperr[256], sslerror[256], peer_CN[256];
 	int ret, errnr, tmplen, j;
-	X509 *peer_cert;
+	X509 *peer_cert = NULL;
 	unsigned int n;
 	unsigned char md[255];
 
