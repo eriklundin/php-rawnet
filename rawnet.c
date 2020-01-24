@@ -367,6 +367,7 @@ PHP_FUNCTION(rawnet_read) {
 	php_rawnet *res;
 	zval *zid;
 	zend_long rlen;
+	zend_string *result;
 	char *buf = NULL;
 	int ssl_errcode, ret, readret;
 
@@ -384,7 +385,14 @@ PHP_FUNCTION(rawnet_read) {
 	if(res->ssl == NULL) {
 		readret = read(res->socket, buf, rlen);
 		if(readret > 0) {
-		 	RETURN_STRINGL(buf, readret);
+
+			result = zend_string_safe_alloc(readret, 1, 0, 0);
+			memcpy(ZSTR_VAL(result), buf, readret);
+			ZSTR_VAL(result)[readret] = '\0';
+
+			efree(buf);
+			RETURN_NEW_STR(result);
+
 		} else if(readret == 0) {
 			efree(buf);
 			RETURN_FALSE;
@@ -404,8 +412,15 @@ PHP_FUNCTION(rawnet_read) {
 	ssl_errcode = SSL_get_error(res->ssl, 0);
 
 	if(ret > 0) {
+
 		// Success
-	 	RETURN_STRINGL(buf, ret);
+		result = zend_string_safe_alloc(readret, 1, 0, 0);
+		memcpy(ZSTR_VAL(result), buf, readret);
+		ZSTR_VAL(result)[readret] = '\0';
+
+		efree(buf);
+		RETURN_NEW_STR(result);
+
 	}
 
 	efree(buf);
