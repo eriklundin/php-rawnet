@@ -50,6 +50,8 @@ int le_rawnet;
 
 static const char hexcodes[] = "0123456789ABCDEF";
 
+static void _php_rawnet_close_ex(php_rawnet *res);
+
 void _rawnet_init_openssl() {
 	SSL_load_error_strings();
 	SSL_library_init();
@@ -59,12 +61,15 @@ void _rawnet_init_openssl() {
 
 void _rawnet_get_cert_data(X509 *xs, php_rawnet *res) {
 
-	BIO *bio;
-	BUF_MEM *bio_buf;
+	BIO *bio = NULL;
+	BUF_MEM *bio_buf = NULL;
+
 	if ((bio = BIO_new(BIO_s_mem())) == NULL)
-        return;
+	        return;
+
 	PEM_write_bio_X509(bio, xs);
 	BIO_get_mem_ptr(bio, &bio_buf);
+	res->peer_cert = NULL;
 	res->peer_cert = emalloc(bio_buf->length);
 	snprintf(res->peer_cert, bio_buf->length, bio_buf->data);
 	BIO_free(bio);
@@ -86,7 +91,7 @@ void _rawnet_get_cert_serial(X509 *xs, php_rawnet *res) {
 		return;
 	i2a_ASN1_INTEGER(bio, X509_get_serialNumber(xs));
 	n = BIO_pending(bio);
-	res->peer_cert_serial = malloc(n + 1);
+	res->peer_cert_serial = emalloc(n + 1);
 	n = BIO_read(bio, res->peer_cert_serial, n);
 	res->peer_cert_serial[n] = '\0';
 	BIO_free(bio);
@@ -233,6 +238,7 @@ PHP_FUNCTION(rawnet_init) {
 	rn->peer_cert_serial = NULL;
 	rn->peer_cert_fingerprint = NULL;
 	rn->connecting = 0;
+	rn->ctx_init = 0;
 
 	ZVAL_RES(return_value, zend_register_resource(rn, le_rawnet));
 	rn->res = Z_RES_P(return_value);
@@ -414,9 +420,9 @@ PHP_FUNCTION(rawnet_read) {
 	if(ret > 0) {
 
 		// Success
-		result = zend_string_safe_alloc(readret, 1, 0, 0);
-		memcpy(ZSTR_VAL(result), buf, readret);
-		ZSTR_VAL(result)[readret] = '\0';
+		result = zend_string_safe_alloc(ret, 1, 0, 0);
+		memcpy(ZSTR_VAL(result), buf, ret);
+		ZSTR_VAL(result)[ret] = '\0';
 
 		efree(buf);
 		RETURN_NEW_STR(result);
@@ -765,6 +771,7 @@ PHP_FUNCTION(rawnet_ssl_connect) {
 			snprintf(errmsg, sizeof(errmsg), "Unable to create SSL-CTX");
 			goto cleanup;
 		}
+		res->ctx_init = 1;
 	}
 
 	if(certificate != NULL && ZSTR_LEN(certificate) > 0) {
@@ -814,7 +821,8 @@ PHP_FUNCTION(rawnet_ssl_connect) {
 				if (errno == EWOULDBLOCK || errno == EAGAIN) {
 					RETURN_FALSE;
 				}
-				snprintf(tmperr, sizeof(tmperr), "SSL_ERROR_SYSCALL");
+				ERR_error_string(ERR_get_error(), sslerror);
+				snprintf(tmperr, sizeof(tmperr), "SSL_ERROR_SYSCALL: Errno: %d, Errstr: %s,  %d: %s", errno, strerror(errno), ERR_get_error(), sslerror);
 			break;
 			case SSL_ERROR_WANT_READ:
 			case SSL_ERROR_WANT_WRITE:
@@ -911,6 +919,7 @@ PHP_FUNCTION(rawnet_ssl_listen) {
 			snprintf(errmsg, sizeof(errmsg), "Unable to create SSL-CTX");
 			RETURN_STRING(errmsg);
 		}
+		res->ctx_init = 1;
 	}
 
 	if(SSL_CTX_use_certificate_file(res->ctx, ZSTR_VAL(certificate), SSL_FILETYPE_PEM) <= 0) {
@@ -1036,8 +1045,10 @@ PHP_FUNCTION(rawnet_ssl_accept) {
 		_rawnet_get_cert_cn(peer_cert, res);
 		_rawnet_get_cert_serial(peer_cert, res);
 		_rawnet_get_cert_fingerprint(peer_cert, res);
+
 	}
 
+	X509_free(peer_cert);
 
 	RETURN_TRUE;
 
@@ -1074,12 +1085,8 @@ PHP_FUNCTION(rawnet_ssl_close) {
 		RETURN_FALSE;
 	}
 
-	if(res->ssl == NULL)
-		RETURN_TRUE;
+	_php_rawnet_close_ex(res);
 
-	SSL_shutdown(res->ssl);
-	SSL_free(res->ssl);
-	res->ssl = NULL;
 	RETURN_TRUE;
 }
 /* }}}*/
@@ -1198,8 +1205,32 @@ PHP_MINFO_FUNCTION(rawnet)
 }
 /* }}} */
 
-static void _php_rawnet_close(zend_resource *rsrc) {
+static void _php_rawnet_close_ex(php_rawnet *res) {
+
+	if(res->ssl != NULL) {
+		SSL_shutdown(res->ssl);
+		SSL_free(res->ssl);
+		res->ssl = NULL;
+	}
+
+	if(res->ctx_init == 1 && res->ctx != NULL) {
+		SSL_CTX_free(res->ctx);
+		res->ctx = NULL;
+		res->ctx_init = 0;
+	}
+
+	if(res->peer_cert_serial != NULL) {
+		efree(res->peer_cert_serial);
+		res->peer_cert_serial = NULL;
+	}
+
 }
+
+static void _php_rawnet_close(zend_resource *rsrc) {
+	php_rawnet *res = (php_rawnet *) rsrc->ptr;
+	_php_rawnet_close_ex(res);
+}
+
 
 PHP_MINIT_FUNCTION(rawnet) {
 	le_rawnet = zend_register_list_destructors_ex(_php_rawnet_close, NULL, "rawnet", module_number);

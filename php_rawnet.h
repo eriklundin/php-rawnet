@@ -54,6 +54,7 @@ typedef struct {
 	int		port;
 	int		blocking;
 	int		connecting;
+	int		ctx_init;
 
 	// SSL-properties
 	SSL			*ssl;
