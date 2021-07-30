@@ -1,7 +1,7 @@
 /***************************************************************************
  * File: php_rawnet.h                                   Part of php-rawnet *
  *                                                                         *
- * Copyright (C) 2019 Erik Lundin.                                         *
+ * Copyright (C) 2019-2021 Erik Lundin.                                    *
  *                                                                         *
  * Permission is hereby granted, free of charge, to any person obtaining   *
  * a copy of this software and associated documentation files (the         *
@@ -32,9 +32,9 @@
 # define PHP_RAWNET_H
 
 extern zend_module_entry rawnet_module_entry;
-# define phpext_rawnet_ptr &rawnet_module_entry
+#define phpext_rawnet_ptr &rawnet_module_entry
 
-# define PHP_RAWNET_VERSION "0.2.1"
+#define PHP_RAWNET_VERSION "0.2.7"
 
 #define CAAL(s, v) add_assoc_long_ex(return_value, s, sizeof(s) - 1, (zend_long) v);
 #define CAAS(s, v) add_assoc_string_ex(return_value, s, sizeof(s) - 1, (char *) (v ? v : ""));
@@ -42,9 +42,6 @@ extern zend_module_entry rawnet_module_entry;
 #define PHP_SAFE_MAX_FD(m, n)	 do { if (m >= FD_SETSIZE) { _php_emit_fd_setsize_warning(m); m = FD_SETSIZE - 1; }} while(0)
 #define PHP_SAFE_FD_SET(fd, set) do { if (fd < FD_SETSIZE) FD_SET(fd, set); } while(0)
 #define PHP_SAFE_FD_ISSET(fd, set)  ((fd < FD_SETSIZE) && FD_ISSET(fd, set))
-
-extern int le_rawnet;
-#define le_rawnet_name "rawnet handle"
 
 typedef struct {
 
@@ -57,15 +54,26 @@ typedef struct {
 	int		ctx_init;
 
 	// SSL-properties
-	SSL			*ssl;
-	SSL_CTX			*ctx;
-	char			*peer_cert;
-	char			*peer_cert_cn;
-	char			*peer_cert_serial;
-	char			*peer_cert_fingerprint;
+	SSL		*ssl;
+	SSL_CTX		*ctx;
+	char		*peer_cert;
+	char		*peer_cert_cn;
+	char		*peer_cert_serial;
+	char		*peer_cert_fingerprint;
+
+	zend_object	std;
 
 } php_rawnet;
 
+static const zend_function_entry class_Rawnet_methods[] = {
+	ZEND_FE_END
+};
+
+static inline php_rawnet *rawnet_from_obj(zend_object *obj) {
+	return (php_rawnet *)((char *)(obj) - XtOffsetOf(php_rawnet, std));
+}
+
+#define Z_RAWNET_P(zv) rawnet_from_obj(Z_OBJ_P(zv))
 
 # if defined(ZTS) && defined(COMPILE_DL_RAWNET)
 ZEND_TSRMLS_CACHE_EXTERN()

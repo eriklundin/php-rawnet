@@ -39,7 +39,7 @@ $rn = rawnet_init();
 $ret = rawnet_listen($rn, 8080, 10);
 $ret = rawnet_ssl_listen(
         $rn,
-		'/tmp/localhost.crt',
+        '/tmp/localhost.crt',
         '/tmp/localhost.key',
         '/tmp/testca.crt',
         TRUE

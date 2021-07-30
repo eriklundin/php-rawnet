@@ -1,7 +1,7 @@
 /***************************************************************************
  * File: rawnet.c                                       Part of php-rawnet *
  *                                                                         *
- * Copyright (C) 2019 Erik Lundin.                                         *
+ * Copyright (C) 2019-2021 Erik Lundin.                                    *
  *                                                                         *
  * Permission is hereby granted, free of charge, to any person obtaining   * 
  * a copy of this software and associated documentation files (the         *
@@ -30,6 +30,7 @@
 
 #include "php.h"
 #include "ext/standard/info.h"
+#include "zend_interfaces.h"
 #include "php_rawnet.h"
 
 #include <sys/types.h>
@@ -39,7 +40,31 @@
 #include <fcntl.h>
 #include <poll.h>
 
-int le_rawnet;
+zend_class_entry *rawnet_ce;
+static zend_object_handlers rawnet_object_handlers;
+
+static zend_object *rawnet_create_object(zend_class_entry *class_type) {
+	php_rawnet *intern = zend_object_alloc(sizeof(php_rawnet), class_type);
+	zend_object_std_init(&intern->std, class_type);
+	object_properties_init(&intern->std, class_type);
+	intern->std.handlers = &rawnet_object_handlers;
+	return &intern->std;
+}
+
+static zend_function *rawnet_get_constructor(zend_object *object) {
+	zend_throw_error(NULL, "Cannot directly construct Rawnet, use rawnet_init() instead");
+	return NULL;
+}
+
+static void rawnet_free_obj(zend_object *object) {
+	php_rawnet *rawnet = rawnet_from_obj(object);
+	zend_object_std_dtor(&rawnet->std);
+}
+
+static HashTable *rawnet_get_gc(zend_object *object, zval **table, int *n) {
+	php_rawnet *rawnet = rawnet_from_obj(object);
+	return zend_std_get_properties(object);
+}
 
 /* For compatibility with older PHP versions */
 #ifndef ZEND_PARSE_PARAMETERS_NONE
@@ -130,7 +155,7 @@ int _rawnet_nonblock(int s, int val) {
 }
 
 
-static int _rawnet_array_to_fd(zval *arr, fd_set *fds, int *max_fd) {
+static int _rawnet_array_to_fd(uint32_t arg_num, zval *arr, fd_set *fds, int *max_fd) {
 
 	zval *elem;
 	php_rawnet *res;
@@ -141,17 +166,14 @@ static int _rawnet_array_to_fd(zval *arr, fd_set *fds, int *max_fd) {
 
 	ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(arr), elem) {
 
-		if(Z_TYPE_P(elem) != IS_RESOURCE) {
-			php_error_docref(NULL TSRMLS_CC, E_WARNING, "None resource passed in select array");
-			continue;
-		}
-
 		ZVAL_DEREF(elem);
 
-		if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(elem), le_rawnet_name, le_rawnet)) == NULL) {
-			php_error_docref(NULL TSRMLS_CC, E_WARNING, "Invalid rawnet resource passed in array");
+		if(Z_TYPE_P(elem) != IS_OBJECT || Z_OBJCE_P(elem) != rawnet_ce) {
+			zend_argument_type_error(arg_num, "must only have elements of type Rawnet, %s given", zend_zval_type_name(elem));
 			return 0;
 		}
+
+		res = Z_RAWNET_P(elem);
 
 		if(res->socket < 0)
 			continue;
@@ -167,7 +189,7 @@ static int _rawnet_array_to_fd(zval *arr, fd_set *fds, int *max_fd) {
 	return c > 0 ? 1 : 0;
 }
 
-static int _rawnet_fd_to_array(zval *arr, fd_set *fds) {
+static int _rawnet_fd_to_array(uint32_t arg_num, zval *arr, fd_set *fds) {
 
 	zval *elem, *dest_elem;
 	HashTable *ht;
@@ -182,17 +204,14 @@ static int _rawnet_fd_to_array(zval *arr, fd_set *fds) {
 	ht = zend_new_array(zend_hash_num_elements(Z_ARRVAL_P(arr)));
 	ZEND_HASH_FOREACH_KEY_VAL(Z_ARRVAL_P(arr), num_ind, key, elem) {
 
-		if(Z_TYPE_P(elem) != IS_RESOURCE) {
-			php_error_docref(NULL TSRMLS_CC, E_WARNING, "None resource passed in select array");
-			continue;
-		}
-
 		ZVAL_DEREF(elem);
 
-		if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(elem), le_rawnet_name, le_rawnet)) == NULL) {
-			php_error_docref(NULL TSRMLS_CC, E_WARNING, "Invalid rawnet resource passed in array");
+		if(Z_TYPE_P(elem) != IS_OBJECT || Z_OBJCE_P(elem) != rawnet_ce) {
+			zend_argument_type_error(arg_num, "must only have elements of type Rawnet, %s given", zend_zval_type_name(elem));
 			return 0;
 		}
+
+		res = Z_RAWNET_P(elem);
 
 		if(res->socket < 0)
 			continue;
@@ -222,9 +241,12 @@ static int _rawnet_fd_to_array(zval *arr, fd_set *fds) {
  */
 PHP_FUNCTION(rawnet_init) {
 
+	php_rawnet *rn;
+
 	ZEND_PARSE_PARAMETERS_NONE();
 
-	php_rawnet *rn = ecalloc(1, sizeof(php_rawnet));
+	object_init_ex(return_value, rawnet_ce);
+	rn = Z_RAWNET_P(return_value);
 
 	// Default blocking
 	rn->blocking = 1;
@@ -237,9 +259,6 @@ PHP_FUNCTION(rawnet_init) {
 	rn->peer_cert_fingerprint = NULL;
 	rn->connecting = 0;
 	rn->ctx_init = 0;
-
-	ZVAL_RES(return_value, zend_register_resource(rn, le_rawnet));
-	rn->res = Z_RES_P(return_value);
 }
 /* }}} */
 
@@ -259,16 +278,14 @@ PHP_FUNCTION(rawnet_connect) {
 	int i, len, ret;
 
 	ZEND_PARSE_PARAMETERS_START(3,4)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 		Z_PARAM_STR(hostname)
 		Z_PARAM_LONG(port)
 		Z_PARAM_OPTIONAL
 		Z_PARAM_LONG(timeout_sec)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	if(res->socket != -1 && res->connecting == 1) {
 
@@ -376,13 +393,11 @@ PHP_FUNCTION(rawnet_read) {
 	int ssl_errcode, ret, readret;
 
 	ZEND_PARSE_PARAMETERS_START(2,2)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 		Z_PARAM_LONG(rlen)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	buf = emalloc(rlen + 1);
 
@@ -460,13 +475,11 @@ PHP_FUNCTION(rawnet_write) {
 	int ssl_errcode, ret;
 
 	ZEND_PARSE_PARAMETERS_START(2,2)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 		Z_PARAM_STR(wdata)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	if(res->ssl == NULL) {
 		ret = write(res->socket, ZSTR_VAL(wdata), ZSTR_LEN(wdata));
@@ -528,21 +541,21 @@ PHP_FUNCTION(rawnet_select) {
 	FD_ZERO(&efds);
 
 	if(r_arr != NULL) {
-		set_count = _rawnet_array_to_fd(r_arr, &rfds, &max_fd);
+		set_count = _rawnet_array_to_fd(1, r_arr, &rfds, &max_fd);
 		if(set_count > max_set_count)
 			max_set_count = set_count;
 		sets += set_count;
 	}
 
 	if(w_arr != NULL) {
-		set_count = _rawnet_array_to_fd(w_arr, &wfds, &max_fd);
+		set_count = _rawnet_array_to_fd(2, w_arr, &wfds, &max_fd);
 		if(set_count > max_set_count)
 			max_set_count = set_count;
 		sets += set_count;
 	}
 
 	if(e_arr != NULL) {
-		set_count = _rawnet_array_to_fd(e_arr, &efds, &max_fd);
+		set_count = _rawnet_array_to_fd(3, e_arr, &efds, &max_fd);
 		if(set_count > max_set_count)
 			max_set_count = set_count;
 		sets += set_count;
@@ -572,18 +585,18 @@ PHP_FUNCTION(rawnet_select) {
 	tv.tv_usec = usec;
 
 	if((selret = select(max_fd + 1, &rfds, &wfds, &efds, &tv)) < 0) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Unable to select [%d]: %s (max_fd=%d)", errno, strerror(errno), max_fd);
+		php_error_docref(NULL, E_WARNING, "Unable to select [%d]: %s (max_fd=%d)", errno, strerror(errno), max_fd);
 		RETURN_FALSE;
 	}
 
 	if(r_arr != NULL)
-		_rawnet_fd_to_array(r_arr, &rfds);
+		_rawnet_fd_to_array(1, r_arr, &rfds);
 
 	if(w_arr != NULL)
-		_rawnet_fd_to_array(w_arr, &wfds);
+		_rawnet_fd_to_array(2, w_arr, &wfds);
 
 	if(e_arr != NULL)
-		_rawnet_fd_to_array(e_arr, &efds);
+		_rawnet_fd_to_array(3, e_arr, &efds);
 
 	RETURN_LONG(selret);
 }
@@ -601,15 +614,13 @@ PHP_FUNCTION(rawnet_listen) {
 	char errmsg[255];
 
 	ZEND_PARSE_PARAMETERS_START(2,3)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 		Z_PARAM_LONG(port)
 		Z_PARAM_OPTIONAL
 		Z_PARAM_LONG(backlog)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	if(port < 1) {
 		snprintf(errmsg, sizeof(errmsg), "Invalid port number %d", port);
@@ -670,12 +681,10 @@ PHP_FUNCTION(rawnet_accept) {
 	char errmsg[255];
 
 	ZEND_PARSE_PARAMETERS_START(1,1)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	if(res->socket == -1) {
 		snprintf(errmsg, sizeof(errmsg), "There is no valid socket in resource object");
@@ -688,7 +697,9 @@ PHP_FUNCTION(rawnet_accept) {
 		RETURN_STRING(errmsg);
 	}
 
-	retres = ecalloc(1, sizeof(php_rawnet));
+	object_init_ex(return_value, rawnet_ce);
+	retres = Z_RAWNET_P(return_value);
+
 	retres->blocking = 1;
 	retres->connecting = 0;
 	retres->socket = socket;
@@ -702,9 +713,6 @@ PHP_FUNCTION(rawnet_accept) {
 	retres->peer_cert_fingerprint = NULL;
 
 	snprintf(retres->hostname, sizeof(retres->hostname), "%s", (char *)inet_ntoa(peer.sin_addr));
-
-	ZVAL_RES(return_value, zend_register_resource(retres, le_rawnet));
-	retres->res = Z_RES_P(return_value);
 }
 /* }}}*/
 
@@ -716,12 +724,10 @@ PHP_FUNCTION(rawnet_close) {
 	zval *zid;
 
 	ZEND_PARSE_PARAMETERS_START(1,1)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	if(res->socket == -1)
 		RETURN_TRUE;
@@ -748,16 +754,14 @@ PHP_FUNCTION(rawnet_ssl_connect) {
 	unsigned char md[255];
 
 	ZEND_PARSE_PARAMETERS_START(1,4)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 		Z_PARAM_OPTIONAL
 		Z_PARAM_STR(certificate)
 		Z_PARAM_STR(privatekey)
 		Z_PARAM_STR(cacertificate)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	if(res->socket == -1) {
 		snprintf(errmsg, sizeof(errmsg), "There is no valid socket in resource object");
@@ -898,7 +902,7 @@ PHP_FUNCTION(rawnet_ssl_listen) {
 	zend_bool forceclientcert = FALSE;
 
 	ZEND_PARSE_PARAMETERS_START(4,5)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 		Z_PARAM_STR(certificate)
 		Z_PARAM_STR(privatekey)
 		Z_PARAM_STR(cacertificate)
@@ -906,9 +910,8 @@ PHP_FUNCTION(rawnet_ssl_listen) {
 		Z_PARAM_BOOL(forceclientcert)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+
+	res = Z_RAWNET_P(zid);
 
 	if(res->ctx == NULL) {
 		res->ctx = SSL_CTX_new(TLSv1_2_server_method());
@@ -967,14 +970,12 @@ PHP_FUNCTION(rawnet_ssl_accept) {
 	X509 *peer_cert = NULL;
 
 	ZEND_PARSE_PARAMETERS_START(1,2)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 		Z_PARAM_OPTIONAL
 		Z_PARAM_BOOL(forceclientcert)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	if(res->ctx == NULL) {
 		snprintf(errmsg, sizeof(errmsg), "No CTX created on socket accept");
@@ -1076,12 +1077,10 @@ PHP_FUNCTION(rawnet_ssl_close) {
 	zval *zid;
 
 	ZEND_PARSE_PARAMETERS_START(1,1)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	if(res->ssl != NULL) {
 		SSL_shutdown(res->ssl);
@@ -1111,13 +1110,11 @@ PHP_FUNCTION(rawnet_set_blocking) {
 	char errmsg[255];
 
 	ZEND_PARSE_PARAMETERS_START(2,2)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 		Z_PARAM_BOOL(mode)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	if(res->socket == -1) {
 			snprintf(errmsg, sizeof(errmsg), "The resource does not contain a valid socket");
@@ -1148,12 +1145,10 @@ PHP_FUNCTION(rawnet_getinfo) {
 	zval *zid;
 
 	ZEND_PARSE_PARAMETERS_START(1,1)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	array_init(return_value);
 
@@ -1178,12 +1173,10 @@ PHP_FUNCTION(rawnet_is_connecting) {
 	zval *zid;
 
 	ZEND_PARSE_PARAMETERS_START(1,1)
-		Z_PARAM_RESOURCE(zid)
+		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
 	ZEND_PARSE_PARAMETERS_END();
 
-	if((res = (php_rawnet *)zend_fetch_resource(Z_RES_P(zid), le_rawnet_name, le_rawnet)) == NULL) {
-		RETURN_FALSE;
-	}
+	res = Z_RAWNET_P(zid);
 
 	if(res->connecting)
 		RETURN_TRUE;
@@ -1243,8 +1236,25 @@ static void _php_rawnet_close(zend_resource *rsrc) {
 
 
 PHP_MINIT_FUNCTION(rawnet) {
+
 	_rawnet_init_openssl();
-	le_rawnet = zend_register_list_destructors_ex(_php_rawnet_close, NULL, "rawnet", module_number);
+
+	zend_class_entry ce_rawnet;
+	INIT_CLASS_ENTRY(ce_rawnet, "Rawnet", class_Rawnet_methods);
+	rawnet_ce = zend_register_internal_class(&ce_rawnet);
+	rawnet_ce->ce_flags |= ZEND_ACC_FINAL | ZEND_ACC_NO_DYNAMIC_PROPERTIES;
+	rawnet_ce->create_object = rawnet_create_object;
+	rawnet_ce->serialize = zend_class_serialize_deny;
+	rawnet_ce->unserialize = zend_class_unserialize_deny;
+
+	memcpy(&rawnet_object_handlers, &std_object_handlers, sizeof(zend_object_handlers));
+	rawnet_object_handlers.offset = XtOffsetOf(php_rawnet, std);
+	rawnet_object_handlers.free_obj = rawnet_free_obj;
+	rawnet_object_handlers.get_constructor = rawnet_get_constructor;
+	rawnet_object_handlers.clone_obj = NULL;
+	rawnet_object_handlers.get_gc = rawnet_get_gc;
+	rawnet_object_handlers.compare = zend_objects_not_comparable;
+
 	return SUCCESS;
 }
 
