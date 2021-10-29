@@ -31,6 +31,7 @@
 #include "php.h"
 #include "ext/standard/info.h"
 #include "zend_interfaces.h"
+#include "php_network.h"
 #include "php_rawnet.h"
 
 #include <sys/types.h>
@@ -769,7 +770,11 @@ PHP_FUNCTION(rawnet_ssl_connect) {
 	}
 
 	if(res->ctx == NULL) {
+#if (OPENSSL_VERSION_NUMBER < 0x10100000L)
 		if((res->ctx = SSL_CTX_new(TLSv1_2_client_method())) == NULL) {
+#else
+		if((res->ctx = SSL_CTX_new(TLS_client_method())) == NULL) {
+#endif
 			snprintf(errmsg, sizeof(errmsg), "Unable to create SSL-CTX");
 			goto cleanup;
 		}
@@ -899,7 +904,7 @@ PHP_FUNCTION(rawnet_ssl_listen) {
 	zval *zid;
 	char errmsg[255], ssl_errbuf[255];
 	zend_string *certificate, *privatekey, *cacertificate;
-	zend_bool forceclientcert = FALSE;
+	zend_bool forceclientcert = 0;
 
 	ZEND_PARSE_PARAMETERS_START(4,5)
 		Z_PARAM_OBJECT_OF_CLASS(zid, rawnet_ce)
@@ -914,7 +919,11 @@ PHP_FUNCTION(rawnet_ssl_listen) {
 	res = Z_RAWNET_P(zid);
 
 	if(res->ctx == NULL) {
+#if (OPENSSL_VERSION_NUMBER < 0x10100000L)
 		res->ctx = SSL_CTX_new(TLSv1_2_server_method());
+#else
+		res->ctx = SSL_CTX_new(TLS_server_method());
+#endif
 		if(res->ctx == NULL) {
 			snprintf(errmsg, sizeof(errmsg), "Unable to create SSL-CTX");
 			RETURN_STRING(errmsg);
@@ -965,7 +974,7 @@ PHP_FUNCTION(rawnet_ssl_accept) {
 	php_rawnet *res;
 	zval *zid;
 	char errmsg[255];
-	zend_bool forceclientcert = FALSE;
+	zend_bool forceclientcert = 0;
 	int ssl_errcode, ret;
 	X509 *peer_cert = NULL;
 
@@ -1089,7 +1098,6 @@ PHP_FUNCTION(rawnet_ssl_close) {
 	}
 
 	if(res->ctx_init == 1 && res->ctx != NULL) {
-		res->ctx->cert_store = NULL;
 		SSL_CTX_free(res->ctx);
 		res->ctx = NULL;
 		res->ctx_init = 0;
