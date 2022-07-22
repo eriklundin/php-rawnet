@@ -1250,10 +1250,8 @@ PHP_MINIT_FUNCTION(rawnet) {
 	zend_class_entry ce_rawnet;
 	INIT_CLASS_ENTRY(ce_rawnet, "Rawnet", class_Rawnet_methods);
 	rawnet_ce = zend_register_internal_class(&ce_rawnet);
-	rawnet_ce->ce_flags |= ZEND_ACC_FINAL | ZEND_ACC_NO_DYNAMIC_PROPERTIES;
+	rawnet_ce->ce_flags |= ZEND_ACC_FINAL | ZEND_ACC_NO_DYNAMIC_PROPERTIES | ZEND_ACC_NOT_SERIALIZABLE;
 	rawnet_ce->create_object = rawnet_create_object;
-	rawnet_ce->serialize = zend_class_serialize_deny;
-	rawnet_ce->unserialize = zend_class_unserialize_deny;
 
 	memcpy(&rawnet_object_handlers, &std_object_handlers, sizeof(zend_object_handlers));
 	rawnet_object_handlers.offset = XtOffsetOf(php_rawnet, std);
